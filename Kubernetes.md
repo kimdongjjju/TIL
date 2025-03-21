@@ -509,3 +509,162 @@ kubectl -n kube-system get daemonset
 kubectl get pod -n kube-system -o wide | grep calico
 
 kubectl -n kube-system describe pod {pod}
+
+---
+deployment replica 를 2로 구성하면
+
+사용자자가 설정한 2개의 pod 스케일을 항상 맞춰줘야하기 때문에
+
+pod 하나가 죽더라도 pod를 자동으로 2개로 다시 맞춰준다. ( 롤링업데이트 등도)
+
+`Pod`
+
+- 하나 이상의 container를 포함
+- pod 단위로 배포
+  - runtime container → application 수행
+  - init container → 기동 시점에 처리하고 종료
+  - sidecar container → 보조 역할 (로그수집 등)
+- 내부 매커니즘
+  - Pause container를 통해 HostOS의 namespace를 공유함(커널기술)
+  - Pod를 만들면 Pause Container가 먼저 들어오고 안쪽의 container에 커널기술을 공유해준다.
+    Pod가 컨테이너의 Host가 된다.
+  - IPC, Network, PID, File System 등이 namespace를 통해 공유
+  - Pod 내 컨테이너들은 [localhost](http://localhost) 처럼 통신하게 된다.
+
+- Pause container
+  - pause container의 namespace를 pod내부의 모든 container에게 공유하는 역할
+    namespace → 격리기술
+  - $ ps -ef | grep pause
+  - $ pstree
+- 멀티컨테이너는 Pod 속 컨테이너들은 이더넷을 공유받아서 각은 IP로 사용
+
+$ strace kubectl get pod
+
+→ kubectl debug
+
+`create pod`
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+	name: myweb1
+	labels:
+		app: myweb1
+spec:
+	containers:
+	- name: nginx-container
+		image: nginx:1.25.3-alpine
+		ports:
+		- containerPort: 80
+```
+
+$ kubectl apply -f myweb1.yaml
+
+$ kubectl get po -o wide | grep myweb1
+
+`create pod service`
+
+```yaml
+apiVersion: v1
+kind: service
+metadata:
+	name: myweb-svc
+spec:
+	selector:
+		app: myweb1
+	ports:
+		- port: 8001
+			targetPort: 80
+	externalIPs:
+		- 192.168.56.103 (pod 의 노드 ip)
+```
+
+$ apply -f myweb1-svc.yaml
+
+$ get po,svc -o wide | grep myweb
+
+$ kubectl logs ${pod-name}
+
+`create mysql pod`
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+	name: mysql57-pod
+	labels:
+		type: mysql57
+spec:
+	containers:
+	- name: mysql57-container
+		image: mysql:5.7
+		ports:
+		- containerPort: 3306
+		env:
+		- name: MYSQL_ROOT_PASSWORD
+			value: "k8spass#"
+```
+
+$ kubectl exec -it mysql57-pod — bash
+
+$ mysql -uroot -p
+
+`create mysql service pod`
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+	name: mysql-svc
+spec:
+	selector:
+		type: mysql57
+	ports:
+	- port: 13306
+		targetPort: 3306
+	externalIPs:
+	- 192.168.56.103
+	
+```
+
+$ kubectl apply -f mysql-svc.yaml
+
+`Pod to Pod network`
+
+- 모든 Pod는 Ip 주소(eth0) 와 network namespace가 있고, 연결할 . 수있는 가상 이더넷 연결이 있어서 가능
+
+`Node to Node network`
+
+- 클러스터 대부분의 경우엔 Node에 할당된 IP 주소가 포함된 Routing Table 가지고 있음
+
+![image.png](attachment:3c86e9d1-87e1-43f1-9bd7-f1d010c76b2c:image.png)
+
+pod → eh0 → calie → vRouter(calico) → node eth0 → routing → routing → eth0 → pod
+
+`Pod 삭제`
+
+- SIGTERM 보낸 . 후일정 시간동안 graceful shutdown이  되지않는다면 강제 SIGKILL을 보내서 pod를 종료 시킴
+  - 이 대기 기간은 termination grace period seconds 으로 설정(default = 30ms)
+
+$ kubectl delete pod myweb —grace-period=0 —force  → 즉시 삭제
+
+Pod가 실행되는 동안 오류가 있다면 kubelet은 오류 처리를 위해 restart 수행
+
+실행 중인 pod는 명세와 실제 상태를 모두 보유
+
+`Pod lifecycle`
+
+![image.png](attachment:e3246251-5833-4d40-b2c1-aafa79a6eaa0:image.png)
+
+`Pod Conditions`
+
+![image.png](attachment:6cf36b62-1730-4e56-864e-e498806b49a4:image.png)
+
+initial container
+
+- Pod restartPolicy : Never 설정하면 재시도 안한다.
+- 원격지 소스로 부터 최신 구성 파일을 가져올때
+- 데이터 베이스를 초기화 해야할때
+
+sidecar container
