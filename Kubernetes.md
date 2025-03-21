@@ -418,3 +418,94 @@ kubectl run <pod-name> --image=<imgae-name> ..
 - pstree → containerd , containerd-shim 이 연결되어 컨테이너 작업들이 진행.
 
 
+`Kubernetes Cluster`
+
+- 컨테이너화된 애플리케이션을 실행하는 . 데사용되는 물리적 및 가상 Node 그룹
+- k8s object의 성능과 안전성을 보장할 수 있는 시스템을 구축하기 위해 모든 Node를 그룹화하는 것을 클러스터라 한다.
+
+`Kubernetes Node`
+
+- Node는 Kubernetes 클러스터에 소속된 **`단일 서버 → 노드라는것도 하나의** Object**이다**`
+  - Kubernetes 직접적으로 서버의 영역을 관리할 수 있도록 추상화 시켜놓은게 Node이고 노드 안에서 Pod를 호스팅.
+  - 실제 workload 인 Pod가 실행되는 기본 단위, 즉 Pod 호스팅 → 하나의 Pod는 여러개의 컨테이너를 보유할 수 있다 (설계 패턴이 있다)
+  - Pod 내부에서는 우리가 필요로 하는 애플리케이션 컨테이너를 실행,
+  - 컨테이너 내에서 독립적인 애플리케이션을 실행
+- Control Plane 은 Worker node 와 클러스터 내 Pod를 관리하고, Worker node는
+  애플리케이션의 구성요소인 Pod를 호스트한다. (Data Plane: 작업이 실행되는 영역)
+- 운영 환경에서는 일반적으로 Controle Plane 이 여러 서버에 걸쳐 관리를 수행하고,
+  클러스터는 일반적으로 여러 Node를 실행하므로 `내결함성과 고가용성`이 제공된다.
+
+- Node는 “kube-controller-manager” 에 의해 5초 간격으로 노드 상태를 체크하여 API 서버에 보고
+  (node controller가 따로있기 때문에)
+  - Node가 등록될 때 Node에 CIDR Block 할당
+  - 내부 Node 정보를 최신 상태로 유지, Cloud provider와 연동 시 사용
+  - Node 상태 모니터링 (—node-monitor-period=5)
+- Node가 사용 중인 리소스 용량에 대한 정보 추적하여 API 서버에 보고 됨 (by kubelet 역할)
+  이 정보는 Scheduler가 모든 Node의 모든 Pod에 충분한 지원이 있는지 확인할 때 사용
+
+`Kubernetes Node 가용성 유지`
+
+- kubelet
+- controller-manager
+
+![image.png](attachment:c6a2f919-ef91-4cac-af4e-85cce4c38459:image.png)
+
+`Kubernetes worker node 구성 요소 (Pod를 예약하고 관리하기 위한 도구)`
+
+- kubelet
+  - Control plane 및 worker node 모두에 존재
+  - Pod 실행(CRUD)을 위해 control plane의 API 서버와 통신 수행
+  - probe 기능을 이용하여 (liveliness, readiness ..) 처리
+  - **kubelet architecture**
+
+    ![image.png](attachment:26971de4-bf94-4a04-b81d-089662944593:image.png)
+
+- kube-proxy
+  - pod를 외부에 노출 시키기 위함 → service object를 이용
+  - 모든 노드에 Daemon Set으로 지원
+  - **API 서버와 통신, 서비스와 해당 PodIP, Port에 대한 세부 정보를 가져옴**
+  - IPTables 모드를 사용 → NAT를 따로 안해도됨 → 로드밸런싱 처리도 가능함
+- container runtime
+  - OCI는 컨테이너 형식 및 런타임에 대한 표준 집함
+  - **container runtime architecture**
+
+    ![image.png](attachment:74088150-61ec-40ef-b5d7-a8a5a8633dbd:image.png)
+
+- CNI, Metrics Server
+
+`Kubernetes 주요 구성요소`
+
+- kube-apiserver
+- etcd
+  - kubectl exec -it -n kube-system etcd-k8s-msater -sh
+  - snapsho {save/restore} /var/lib/etcd/snapshot.db → 장애
+- kube-scheduler
+  - kubenetes의 파드를 예약하는,
+  - API서버로부터 Pod 생성 이벤트를 수신하여 배포 시 우선순위를 정해서 할당
+    - Scheduling context
+      - Scheduling cycle worker node 선택
+      - Binding cycle → 변경 사항 적용
+  - 생성에 가장 적합한 노드를 선택한다.
+- kube-controller-manager
+  - 무한 제어 루프를 실행하는 프로그램으로 모든 Kubernetes 컨트롤러를 관리하는 구성요소
+  - 지속적으로 실행하면서 관리 및 감시
+- kube-cloud-controller-manager
+
+`Kubernetes CNI (calico)`
+
+Container Network Interface
+
+- CNI는 컨테이너(Pod)간의 네트워킹을 제어할 수 있는 플러그인 기반 Network architecture
+- kubenet이라는 기본적인 CNI가 있지만 기능이 매우 제한적임
+- Kubernetes cluster 환경에서는 필요하다
+  - 중복되지 않는 IP를 부여하면서
+  - 각 노드에 있는 Pod들과 통신하기 위함
+  - 각 노드별로 subnet(CIDR) 부여 → Block이라고 표현함
+- 생성 시 IP를 할당하고 삭제 시 회수를 하여 재사용가능하게 된다.
+- 컨테이너 네트워크는 Bridge Interface (2계층) 사용한다.
+
+kubectl -n kube-system get daemonset
+
+kubectl get pod -n kube-system -o wide | grep calico
+
+kubectl -n kube-system describe pod {pod}
