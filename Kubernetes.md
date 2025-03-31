@@ -668,3 +668,195 @@ initial container
 - 데이터 베이스를 초기화 해야할때
 
 sidecar container
+
+---
+
+`Label`
+
+복잡하고, 다양한 Pod를 효율적인 집합으로 다루기 위한 방법으로 Label 사용
+
+- 객체를 식별하고 그룹화
+- Label로 선택된 리소스만 Service로 연결하여 부하분산을 가능하게 해준다.
+- 특정 리소스만 배포하고 업데이트할 수 있다.
+
+`Annotations` → API를 통해 추가적인 데이터를 저장하는 방법
+
+$ get pod —show-labels | grep {pod}
+
+$ get pod —selector=key=value
+
+`부하분산 서비스 작성`
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+	name: label-pod-a
+	namespace: infra-team-ns1
+	labels:
+		type: infra1
+spec:
+	containers:
+	- name: pod-a-container
+		image: dbgurum/k8s-lab:initial
+		
+---
+
+apiVersion: v1
+kind: Pod
+metadata:
+	name: label-pod-a
+	namespace: infra-team-ns1
+	labels:
+		type: infra1
+spec:
+	containers:
+	- name: pod-a-container
+		image: dbgurum/k8s-lab:initial
+		
+---
+
+apiVersion: v1
+kind: Pod
+metadata:
+	name: label-pod-a
+	namespace: infra-team-ns1
+	labels:
+		type: infra1
+spec:
+	containers:
+	- name: pod-a-container
+		image: dbgurum/k8s-lab:initial
+		
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+	name: infra-svc1
+	namespace: infra-team-ns1
+spec:
+	selector:
+		type: infra1
+	ports:
+	- port: 7777
+
+```
+
+$ kubectl -n infra-team-nsl describe svc infra-svc
+
+---
+
+`Probes`
+
+Pod Probe Service
+
+kubelet이 주기적으로 수행 Container 내 Handler를 호출
+
+- ExecAction
+- TCPSocketAction
+- HTTPGetAction
+
+`Pod 진단(Probe) 서비스 종류`
+
+→ 모두 Pod에 있는 컨테이너의 안정성과 가용성을 보장하는 데 사용되는 메커니즘
+
+liveness Probe: container가 동작 중인지 여부를 진단한다. (healthcheck)
+
+readiness Probe: container가 요청을 처리할 준비가 되었는지 여부를 진단한다. (traffic을 반을준비)
+
+```yaml
+spec:
+	conatiners:
+	- name: 
+		image:
+		prots:
+		- containerPort: 8080
+		readinessProbe:
+			httpGet:
+				path: /healthcheck
+				port: 8080
+			initialDelaySeconds: 15
+			periodSeconds: 10
+		...
+		readinessProbe:
+			tcpSocket:
+				port: 8080
+			initialDelaySeconds: 15
+			periodSeconds: 10
+		...
+		readinessProbe:
+			exec:
+				command:
+				- /bin/sh
+				- -c
+				- test-shell.sh
+			initialDelaySeconds: 15
+			periodSeconds: 10		
+```
+
+startup Probe: container 내의 애플리케이션이 시작되었는지를 진단한다.
+
+![image.png](attachment:a0968fc5-a32f-4767-be0d-1a4d947aed55:image.png)
+
+---
+
+`Pod Networking을 위한 Service 생성과 관리`
+
+`Kubernetes Service`
+
+- Service는 네트워크 추상화 object로 생성된 pod에 동적 접근이 가능하고, 이를통해 애플리케이션을 클러스터 내의 네트워크 서비스로 노출할 수 있다.
+- Service는 Ip 또는 DNS 이름을 통해 특정 포트에 직접 액세스할 수 있도록 Pod를 논리적으로 그룹화할 수 있다.
+- Service를 등록하면 자체적인 DNS가 부여된다.
+
+`Kubernetes Service 필요 이유`
+
+→ 특정 Pod로 직접 들어가는게 아니고 단일 진입점 역할을 한다.
+
+→ Service selector에 app: backend로 설정하면 , Pod에 labels app: backend 라면 트래픽을 전달한다.
+
+![image.png](attachment:72b87109-17c7-4b4e-b0f0-af2d59297e85:image.png)
+
+$ kubectl describe svc app-svc
+
+`Service는 어떻게 연결되나?`
+
+- service는 가상IP와 port를 가지고 생성
+- kube-proxy는 이 Service의 가상IP를 구현하고 port와 함께 관리하는 역할
+- Service object는 Pod를 노출하면 kube-proxy는 Service object와 그룹화된 Pod로 트래픽을 보내는 네트워크 규칙(Rules) 생성
+- Iptables mode
+- IPVS
+  - RR
+  - LC
+  - DH
+  - SH
+  - SED
+
+$ kubectl logs -f -n kube-system kube-proxy-h16s
+
+`kube-proxy는 apiserver를 감시하여 iptables 정보를 업데이트 함`
+
+Service type
+
+- Cluster Ip  → Service를 클러스터 내부 가상 IP를 구현하여 노출
+- Node Port → 고정 포트로 각 Node의 Ip에 Service를 외부에 노출
+- Load Balancer → 클라우드 공급자의 로드 밸런서를 사용하여 Service를 외부에 노출
+- External Name → 일반적인 selector 연결이 아닌 외부 서비스에 대한 DNS name을 제공해 내부 파드가 외부의 특정 도메인에 접근하게 하기 위한 리소스
+
+- Ingress → Ingress를 사용하여 Service를 외부에 노출, Ingress는 서비스 유형은 아니지만, 클러스터의 진입점 역할 수행
+
+---
+
+`Ingress`
+
+- L7 HTTP 및 HTTPS 경로를 서비스에 노출하고 트래픽 규칙을 정의
+- 수신 규칙 및 요청을 이행하는 Ingress Controller를 사용 (AWS Load Balancer Controller)
+- Ingress object를 사용하면 사용하는 로드 밸런서의 수를 줄일 수 있다.
+  - 기존의 서비스당 로드밸런서 하나에서 여러 Ingress당 로드 밸랜서 하나로 전환하고 여러 서비스로 라우팅할 수 있다.
+  - 트래픽은 경로 기반 라우팅을 사용하여 적절한 서비스로 라우팅이 가능
+
+`Ingress 동작과정`
+
+인터넷을 타고 트래픽이 진입 → Ingress Controller를 거치고 → Ingress로 들어오고 → Routing Rule을 통해
+
+→ 연결되어 있는 경로를 통해 서비스를 분리함 → 서비스는 파드에 연결되어있고 → 파드엔 컨테이너 즉 애플리케이션이 있다
