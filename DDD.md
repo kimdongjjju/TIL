@@ -169,3 +169,314 @@ public class CalculateDiscountService {
 
 - infrastructure 영역은 구현 기술을 다루는 저수준 모듈이다.
 - application & domain 영역은 고수준 모듈이다.
+
+
+---
+
+도메인 모델의 엔티티와 DB 관계형 모델의 엔티티는 같은 것이 아니다.
+
+- 도메인 모델의 엔티티는 단순히 데이터를 담고 있는 데이터 구조라기보다는 데이터와 함께 기능을 제공하는 객체이다.
+- 도메인 관점에서 기능을 구현하고 기능 구현을 캡슐화해서 데이터가 임의로 변경되는 것을 막는다.
+- 두 개 이상의 데이터가 개념적으로 하나의 경우 밸류 타입을 이용해서 표혀할 수 있다.
+- 엔티티의 밸류 타입 데이터를 변경할 떄는 객체 자체를 완전히 교체한다는 것을 의미
+
+```java
+  private void setShippingInfo(ShippingInfo newShippingInfo) {
+  	if (newShippingInfo == null) throw new IllegalArgumentException();
+  	this.shippingInfo = newShippingInfo;
+  }
+
+```
+
+**애그리거트**
+
+애그리거트는 관련 객체를 하나로 묶은 군집이다.
+
+애그리거트는 군집에 속한 객체를 관리하는 루트 엔티티를 갖는다.
+
+- 애그리거트는 도메인 규칙을 하나의 단위로 관리
+- 트랜잭션 일관성을 보장하는 경계이다.
+- 애그리거트 간 참조는 ID를 통해 이루어져야 한다.
+- 한 트랜잭션에서는 하나의 애그리거트만 수정하는 것이 좋다.
+
+루트 엔티티는 애그리거트에 속해 있는 엔티티와 밸류 객체를 이용해서 애그리거트가 구현해야 할 기능을 제공한다.
+
+application 영역은 필요한 도메인 객체를 구하거나 저장할 때 repository를 사용한다.
+
+application 영역은 트랜잭션을 관리하는데, 트랜잭션 처리는 repository 구현 기술의 영향을 받는다.
+
+---
+
+표현영역은 데이터 형식이 올바른지 검사하고, 문제 없다면 응용 서비스에 실행을 위임
+
+응용 서비스가 요구하는 형식으로 변환해서 전달
+
+응용 서비스는 도메인 모델을 이용해서 기능을 구현하고, @Transactional 이용하여 트랜잭션을 처리
+
+모듈 구조는 얼마나 세분화 등 정해진 규칙이 없다.  한 패키지에 너무 몰리는 경우와,
+
+한패키지에 가능하면 10~ 15개 미만의 타입 개수를 유지하자.
+
+---
+
+**애그리거트**
+
+복잡한 모델을 관리하는 기준을 제공한다.
+
+한 애그리거트에 속한 객체는 유사하거나 동일한 라이프 사이클을 갖는다.
+
+애그리거트는 독립된 객체 군이며 각 애그리거트는 자기 자신을 관리할 뿐 다른 애그리거트를 관리하지 않는다.
+
+→ 이런 경계를 설정할 때 기본은 도메인 규칙과 요구사항이다
+
+애그리거트에 속한 구성요소는 대부분 함께 생성하고 함께 제거한다. ( 상품 !== 리뷰 )
+
+애그리거트 루트는 단순히 애그리거트에 속한 객체를 포함하는 것으로 끝나는게 아니라.
+
+애그리거트의 일관성이 깨지지 않도록 하는 것이 핵심이다.
+
+→ 애그리거트 외부에서 애그리거트에 속한 객체를 직접 변경하면 안 된다.
+
+→ 밸로 타입의 내부 상태를 변경하려면 애그리거트 루트를 통해서만 가능하다.
+
+→ 애그리거트에 속하는 모델은 한 패키지에 속하기 때문에 패키지나 protected 범위를 사용하면 애그리거트 외부에서 상태 변경 기능을 실행하는 것을 방지할 수 있다.
+
+---
+
+애그리거트에서 다른 애그리거트를 직접 참조할 때 발생할 수 있는 가장 큰 문제
+
+- 편리함의 오용이다.
+
+```java
+public class Order {
+	private Orderer orderer;
+
+	public void changeShippingInfo(ShippingInfo newShippingInfo, boolean useNewShippingAddrAsMemberAddr) {
+		...
+		if (useNewShippingAddrAsMemberAddr). {
+			// 한 애그리거트 내부에서 다른 애그리거트에 접근할 수 있으면,
+			// 구현이 쉬워진다는 것 때문에 다른 애그리거트의 상태를 변경하는
+			// 유혹에 빠지기 쉽다
+			orderer.getMember().changeAddress(newShippingInfo.getAddress());
+		}
+	}
+}
+
+```
+
+- 직접 참조 시 성능과 관련된 여러 가지 고민이 필요하다 → Lazy & eager
+- 확장 → 도메인별로 시스템을 분리하기 시작할 시 DBMS가 달라지고 등등의 문제
+
+→ 해결방안은 ID를 이용해서 다른 애그리거트를 참조하는 것.
+
+```java
+public class ChangeOrderService {
+	@Transactional
+	public void changeShippingInfo(OrderId id, ShippingInfo newShippingInfo, boolean useNewShippingAddrAsMemberAddr) {
+	Order order = orderRepository.findbyId(id);
+	if (order == null) throw new OrderNotFoundException();
+	order.changeShippingInfo(newShippingInfo);
+	if (useNewShippingAsMemberAddr) {
+		Member member =memberRepository.findById(order.getOrderer().getMemberId());
+	member.changeAddress(newShippingInfo.getAddress());
+	}
+	}
+}
+
+```
+
+---
+
+```java
+public class RegisterProductService {
+	public ProductId registerNewProduct(NewProductRequest req) {
+		Store store = storeRepository.findById(req.getStoreId());
+		checkNull(store);
+		if (store.isBlocked()) {
+			throw new StoreBlockedException();
+		}
+		ProductId id = productRepository.nextId();
+		Product product = new Product(id, store.getId(), ...);
+		productRepository.save(product);
+		return id;
+}
+
+```
+
+→ 중요한 도메인 로직 처리가 응용 서비스에 노출되어있다. → 도메인 기능을 응용 서비스에서 구현하고 있는 것이 문제.
+
+---
+
+애그리거트와 JPA 매핑을 위한 기본 규칙
+
+- 애거리거트 루트는 엔티티이므로 @Entity로 매핑 설정한다.
+
+한 테이블에 엔티티와 밸류 데이터가 같이 있다면
+
+- 밸류는 @Embeddable로 매핑 설정한다.
+- 밸류 타입 프로퍼티는 @Embedded로 매핑 설정한다.
+
+```java
+@Entity
+@Table(name= "purchase_order")
+public class Order {
+	private Orderer orderer;
+}
+
+@Embeddable
+public class Orderer {
+	@Embedded
+	@AttributeOverrides(
+		@AttributeOverride(name="id", column= @Column(name="orderer_id"))
+	)
+	private MemberId memberId;
+}
+
+```
+
+- AttributeOverrides @Embeddable 타입에 설정한 컬럼이름과 실제 컬럼 이름이 다르므로 사용
+
+@Embeddable 매핑 타입은 함께 저장되고 삭제되므로 cascade 속성을 추가로 설정하지 않아도 된다.
+
+반면에 애그리거트에 속한 @Entity 타입에 대한 매핑은 cascade 속성을 사용해서 저장과 삭제 시 함께 처리되도
+
+록 설정해야 한다
+
+→ @OneToOne, @OneToMany는 cascade 속성의 기본값이 없으므로 다음 코드처럼 cascade 속성값으로
+
+CascadeType.PERSIST, CascadeType.REMOVE를 설정해야 한다.
+
+---
+
+식별자는 크게 세 가지 방식 중 하나로 생성한다.
+
+- 사용자가 직접 생성
+- 도메인 로직으로 생성
+- DB를 이용한 일련번호 사용
+  - @GeneratedValue 사용
+  - @Id로 매핑 한 프로퍼티/필드에 할당하므로 저장 이후에 엔티티의 식별자를 사용할 수 있다.
+
+---
+
+**응용서비스**
+
+실제 사용자가 원하는 기능을 제공하는 것은 응용 영역에 위치한 서비스이다.
+
+```java
+@PostMapping("/member/join")
+public ModelAndView join(HttpServletRequest request) {
+	String email = request.getParameter("email");
+	String password = request.getParameter("password");
+	// 사용자 요청을 응용 서비스에 맞게 변환
+	JoinRequest joinReq = new JoinRequest(email, password);
+	// 변환한 객체(데이터)를 이용해서 응용 서비스를 실행
+	joinService.join(joinReq);
+}
+
+```
+
+→ 응용 영역은 사용자가 웹 브라우저를 사용하는지 REST API를 호출하는지, TCP 소켓을 사용하는지 알 필요가
+
+없다. 단지 기능 실행에 필요한 입력 값을 받고 실행 결과만 리턴하면 될 뿐이다.
+
+도메인 로직은 응용 서비스에서 구현하지 않는다.
+
+-> 코드의 응집성이 떨어진다.
+
+-> 중복 코드가 발생할 수 있다.
+
+응용서비스 구현 방법 중
+
+- 한 응용 서비스 클래스에 도메인의 모든 기능 구현하기.
+  - 동일한 로직을 위한 코드 중복을 제거하기 쉽다.
+  - 코드 줄 수가 커진다.
+  - 코드가 모이기 시작하면 분리하는게 좋다.
+- 구분되는 기능별로 응용 서비스 클래스 따로 구현하기
+  - 클래스 개수는 많아지지만 코드 품질을 일정 수준 유지할 수 있다.
+  - 중복 코드를 구현할 가능성이 있다.
+
+```java
+public final class MemberServiceHelper {
+	public static Member findExistingMember(MemberRepository repo, String memberId) {
+		Member member = memberRepository.findById(memberId);
+		if (member = null)
+			throw new NoMemberException(memberId);
+		return member;
+	}
+}
+// 공통 로직을 제공하는 메서드를 서비스에서 사용
+import static com.myshop.member.application.MemberServiceHelper.*;
+
+public class ChangePasswordService {
+	private MemberRepository memberRepository;
+	public void changePassword(String memberId, String curPw, String newPw) {
+		Member member = findExistingMember(memberRepository, memberId);
+		member.changePassword(curPw, newPw);
+	}
+}
+
+```
+
+- 구현 클래스가 여러 개인 경우가 아니라면, 인터페이스를 따로 두지 않는다.
+
+응용 서비스의 파라미터 타입을 결정할 떄 주의할 점은 표현 영역과 관련된 타입을 사용하면 안 된다는 점이다.
+
+```java
+@Controller
+@RequestMapping("/member/changePassword")
+public class MemberPasswordController {
+	@PostMapping
+	public String submit(HttpServletRequest request) {
+		try {
+			// 응용 서비스가 표현 영역을 의존하면 안 됨!
+			changePasswordService.changePassword(request);
+		} catch(NoMemberException ex) {
+			//
+		}
+	}
+}
+
+```
+
+→ 응용 서비스만 단독 테스트가 어렵다
+
+→ 의존관계가 발생하게 된다.
+
+→ HttpSession 이나 HttpServletRequest에 대한 처리는 응용서비스에서 처리하면 안된다.
+
+원칙적으로 모든 값에 대한 검증은 응용 서비스에서 처리한다.
+
+---
+
+응용 서비스가 사용자 요청 기능을 실행하는 데 별다른 기여를 하지 못한다면 굳이 서비스를 만들지 않아도 된다.
+
+여러 도메인의 로직이 필요할 대는 한 애그리거트에 억지로 넣기보다는 도메인  서비스를 이용해서 도메인 개념을
+
+명시적으로 드러내면 된다.
+
+```java
+public class Order {
+	public void calculateAmounts(DiscountCalculationService disCalSvc, MemberGrade grade) {
+		Money totalAmounts = getTotalAmounts();
+		Money discountAmounts = disCalSvc.calculateDiscountAmounts(this.orderLines, thiscoupons, grade);
+		this.paymentAmounts = totalAmounts.minus(discountAmounts);
+	}
+}
+
+```
+
+트랜잭션 처리와 같은 로직은 응용 로직이므로 도메인 서비스가 아닌 응용 서비스에서 처리해야한다.
+
+**Tip**
+
+특정 기능이 응용 서비스인지 도메인 서비스인지 감을 잡기 어려울 때는 해당 로직이 애그리거트의 상태를
+
+변경하거나 애그리거트의 상태 값을 계산하는지 검사해 보면 된다.
+
+e.g 계좌 이체 로직은 계좌 애그리거트의 상태를 변경 , 결제 금액 로직은 주문 애그리거트의 주문 금액을 계산.
+
+→ 각각 애그리거트를 변경하고 애그리거트의 값을 계산하는 도메인 로직.
+
+도메인 서비스의 구현이 특정 기술에 종속되면 인터페이스와 구현 클래스로 분리한다
+
+→ 특정 구현 기술에 의존하거나 외부 시스템의 API를 실행한다면 도메인 영역의 도메인 서비스는 인터페이스로 추상화해야 한다.
