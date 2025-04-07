@@ -860,3 +860,173 @@ Service type
 인터넷을 타고 트래픽이 진입 → Ingress Controller를 거치고 → Ingress로 들어오고 → Routing Rule을 통해
 
 → 연결되어 있는 경로를 통해 서비스를 분리함 → 서비스는 파드에 연결되어있고 → 파드엔 컨테이너 즉 애플리케이션이 있다
+
+---
+
+### `Kubernetes Storage Volume`
+
+1. Kubernetes는 Pod의 Volume을 정의한다.
+2. Pod 컨테이너의 기본 설정은 임시 디스크에 보관된다.
+3. Kubernetes volume 추상화가 필요하다
+4. Volume은 Podspec에 포함하여, Pod 내 filesystem에 mount 됨
+  1. Podspec → .spec.volumes 구문으로 볼륨기술 및 이름 지점
+  2. .spec.container[*].volumeMounts. 컨테이너 내부 FS에 mount → df -h로 확인
+  3. Volume은 데이터 공유 및 지속성에 도움 되고, 일부 API 기능을 통해 데이터 이전 효과도 지원
+
+동일한 Pod에 두 컨테이너가 있다면 서로의 구성 파일에는 엑세스할 수 없지만 볼륨 기법을 사용하여 사용가능
+
+![image.png](attachment:e72c3804-129a-4517-a56d-b37aa600c540:image.png)
+
+- Tomcat & Logstash를 사용한다면 **임시 볼륨 기법**을 사용해도 괜찮다.
+
+    ```yaml
+    spec:
+    	container:
+    	- name: container1
+    	image: debian:10
+    	volumeMounts:
+    	- name: internal-vlume
+    		mountPath: /mount1
+    	- name: container2
+    	image: debian:10
+    	volumeMounts:
+    	- name: internal-vlume
+    		mountPath: /mount2
+    	volumes:
+    		- name: internal-volume
+    			emptyDir: {}
+    			
+    -> 
+    ```
+
+  → 임시를 사용한다 → 만약에 임시 데이터가 아닌다면 Node의 특정 경로에 저장한다 → 노드가 장애 시 → Node간의 NFS를 지원해준다.
+
+
+EmptyDir 기법
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+	name: temp-pod1
+spec:
+	volumes:
+	- name: temp-vol
+		emptyDir: {}
+	containers:
+	- image: ubuntu:14.04
+		name: temp-container1
+		volumeMounts:
+		- name: temp-vol1
+			mountPath: /mount1
+	- image: ubuntu:14.04
+		name: temp-container2
+		volumeMounts:
+		- name: temp-vol1
+			mountPath: /mount2		
+```
+
+EmptyDir Memory에 구성
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+	name: temp-mem-pod
+spec:
+	volumes:
+	- name: memory-vol
+		emptyDir:
+			medium: Memory
+			sizeLimit: 1Gi
+	containers:
+	- image: dbgurum/k8s-lab:initial
+		name: mem-container
+		volumeMounts:
+		- name: memory-vol
+			mountpath: /mem-mount
+```
+
+EmptyDir Pod 외부에서 웹 소스 제공
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+	name: myweb-pod
+	labes:
+		app: myweb
+spec:
+	containers:
+	- name: web-source
+		image: alpine
+		args: ["tail", "-f", "/dev/null"]
+		volumeMounts:
+		- name: source-volume
+			mountPath: /source
+		- name: webserver
+			image: nginx:1.25.3-alpine
+			volumeMounts:
+			- name: source-volume
+				mountPath: /usr/share/nginx/html
+			volumes:
+			- name: source-volume
+				emptyDir: {}
+```
+
+$ kubectl run web-test -it —rm —restart=Never —image=curlimages/curl — curl 10.109.131.44
+
+$ kubectl cp index.html myweb-pod:/source/index.html -c web-source
+
+hostPath 기법
+
+- host path는 영구 볼륨으로 Pod가 생성된 Node 파일시스템의 File 및 Directory에 Volume으로 mount
+- 데이터가 특정 Node에 저장되므로 Pod가 재생성 되어 Node가 바뀌면 이전 Node에 저장되어 있던 hostPath Volume의 데이터를 읽지 못함
+- Node 내 저장된 파일을 Pod 들 간 공유해야 하는 경우에 사용됨
+- Pod가 삭제되어도 내용이 삭제되지 않는다 (영구 볼륨)
+
+`→ 보안과 관리에 문제점이 많아 경고사항이 있다.`
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+	name: host-pod1
+spec:
+	containers:
+	- name: container
+		image: dbgurum/k8s-lab:initial
+		volumeMounts:
+		- name: host-path
+			mountPath: /mount1
+		volumes:
+		- name: host-path
+			hostPath:
+				path: /DATA1/fastcampus
+				type: DirectoryOrCreate
+	
+```
+
+NFS 사용
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+	name: nfs-nginx
+spec:
+	containers:
+	- name: nfs-nginx
+		image: nginx:1.25.3-alpine
+		volumeMounts:
+		- name: nfs-vol
+			mountPath: /usr/share/nginx/html
+		volumes:
+		- name: nfs-vol
+			nfs:
+				path: /DATA1
+				server: 192.168.56.101
+```
+
+
+
