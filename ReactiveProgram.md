@@ -128,3 +128,51 @@ DownStream은 하위
 | 5 | Publisher가 Subscriber에게 onError 또는 onComplete signal을 보내는 경우 해당 Subscriber의 구독은 취소된 것으로 간주되어야 한다. |
 | 6 | 일단 종료된 상태 signal을 받으면(onError, onComplete) 더 이상 signal이 발생되지 않아야 한다. |
 | 7 | 구독이 취소되면 Subscriber는 결국 signal을 받는 것을 중지해야 한다. |
+
+**CHAPTER 15 : Spring WebFlux 개요**
+
+WebFlux의 기본 서버 엔진은 Netty 기반이지만, Jetty나 Undertow 같은 서버 엔진에서 지원하는 Reactive Streams Adapter를 통해 Reactive Streams를 지원해준다.
+WebFlux는 Non-Blocking I/O를 지원할 수 있도록 Non-Blocking I/O를 지원해주는 모듈들을 사용해야 한다 (R2DBC 등)
+
+[WebFlux Flow]
+1. 클라이언트에서 요청을 전송
+2. 서버 엔진을 거쳐, **HttpHandler** 가 들어오는 요청을 전달 받는다.
+3. ServerWebExchange (ServerHttpRequest, ServerHttpResponse 포함) 생성한 후 
+4. WebFliter Chain으로 전달
+5. WebFliter Chain에서 전처리 과정 진행
+6. WebHandler Interface의 구현체인 DispatchHandler 에게 전달.
+7. HandlerMapping List를 원본 Flux의 소스로 전달 받는다.
+8. ServletWebExchange를 처리를 핸들러를 조회합니다.
+9. 핸들러를 HandlerAdapter에 위임한하고 , HandlerAdapter -> ServerWebExchange 처리할 핸들러를 호출
+10. 처리 후 응답 데이터 리턴
+11. 응답 데이터를 처리할 HandlerResultHandler를 조회
+12. 응답 데이터를 적절하게 처리후 response로 리턴
+
+WebFilter 와 HandlerFilterFunction의 차이점은 
+WebFilter는 함수형 기반의 요청 핸들러에서 모두 동작하지만, HandlerFilterFunction은 함수형 기반의 핸들러에서만 동작하기 때문에
+함수형 기반의 핸들러에서만 제한적으로 필터링 작업을 수행한다.
+
+```java
+@Component
+public class LogFilter implements WebFilter {
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        String path = exchange.getRequest().getURI().getPaht();
+        return chain.filter(exchange).doAfterTerminate(() -> {
+           if (path.contains("필터대상")) {
+               log.info("path : {}, status : {}", exchange.getResponse(), exchange.getStatusCode());
+           }
+        });
+    }
+}
+```
+
+[WebFlux Process]
+- Non-Blocking의 Event Loop 방식으로 요청을 처리한다.
+1. 클라이언트가 요청 시 요청 핸들러가 전달 받는다.
+2. 요청 핸들러가 이벤트 루프에 요청을 푸시한다.
+3. 이벤트 루프는 네트워크, 데이터베이스 연결 작업 등 비용이 드는 작업에 대한 콜백을 등록합니다.
+4. 작업이 완료되면 완료 이벤트를 이벤트 루프에 푸시합니다.
+5. 등록한 콜백을 호출해 처리 결과를 전달 합니다.
+-> 단일 스레드로 계속 실행되며, 모든 작업들이 이벤트로 처리된다 -> 이벤트 발생 시 해당 이벤트에 대한 콜백을 등록함과 동시에 다음 이벤트 처리로 넘어간다.
+-> 일반적으로 CPU 코어 개수만큼의 스레드 생성 
